@@ -1,37 +1,45 @@
-/* @flow */
+// @flow strict
 
-import type { Route, State, URL, Query, Concat, QueryRoute } from "route.flow"
+import type {
+  Route,
+  State,
+  URL,
+  Query,
+  Push,
+  VariableSegment,
+  ConstantSegment,
+  Param,
+  QueryParam
+} from "route.flow"
 import { parsePathname } from "route.flow/lib/Route/URL"
-import { Root, Empty } from "route.flow"
+import { Root, Base } from "route.flow"
 import { raw } from "./String"
 
 export type { integer, float } from "route.flow"
 export { String, Float, Integer } from "route.flow"
+import { decodePath } from "route.flow/lib/StrictDecoder"
+import type { Decoder } from "./Decoder"
 
-export interface RouterAPI<out> extends Route<out> {
-  route: Route<out>
+export interface RouterRoute<out> extends Route<out> {
+  route: Route<out>;
 }
 
-export type RouterParam<out> = Param<out> & RouterAPI<out>
-export type RouterSegment<out> = Segment<out> & RouterAPI<out>
-export type EitherRouter<out> = RouterParam<out> | RouterSegment<out>
-
-export interface Param<out> {
-  <next>(route: Route<next>): RouterSegment<Concat<out, next>>
+export interface RouterParam<out> extends RouterRoute<out> {
+  <next>(route: Param<next>): RouterSegment<Push<out, next>>;
 }
 
-export interface Segment<out> {
-  (string[], ...string[]): RouterParam<out>
+export interface RouterSegment<out> extends RouterRoute<out> {
+  (string[], ...string[]): RouterParam<out>;
 }
 
-class Router<out> implements RouterAPI<out> {
+class API<out> implements RouterRoute<out> {
   route: Route<out>
 
-  read<inn>(state: State<inn>) {
-    return (this.route.read(state): ?State<Concat<inn, out>>)
+  parseRoute(state: State<[]>): ?State<out> {
+    return this.route.parseRoute(state)
   }
-  write<inn>(state): State<inn> {
-    return this.route.write((state: State<Concat<inn, out>>))
+  formatRoute(state: State<out>): State<[]> {
+    return this.route.formatRoute(state)
   }
 
   parse(path: string[], query: Query): ?out {
@@ -57,44 +65,55 @@ class Router<out> implements RouterAPI<out> {
   segment(path?: string): Route<out> {
     return this.route.segment(path)
   }
-  param<a>(route: Route<[a]>) {
-    return (this.route.param(route): Route<Concat<out, [a]>>)
+  var<b>(segment: VariableSegment<b>): Route<Push<out, b>> {
+    return this.route.var(segment)
   }
-  concat<other>(route: Route<other>): Route<Concat<out, other>> {
-    return this.route.concat(route)
+  const(segment: ConstantSegment & Route<[]>): self {
+    return this.route.const(segment)
   }
-  query<a>(name: string, query: QueryRoute<[a]>) {
-    return (this.route.query(name, query): Route<Concat<out, [a]>>)
+  param<b>(param: VariableSegment<b>): Route<Push<out, b>> {
+    return this.route.param(param)
   }
+  query<b>(name: string, param: QueryParam<b>): Route<Push<out, b>> {
+    return this.route.query(name, param)
+  }
+  rest<b>(param: VariableSegment<b>): Route<Push<out, b>> {
+    return this.route.rest(param)
+  }
+  // concat<other>(route: Route<other>): Route<Concat<out, other>> {
+  //   return this.route.concat(route)
+  // }
 }
 
 const param = <a>(base: Route<a>): RouterParam<a> => {
-  const router = <b>(route: Route<b>): RouterSegment<Concat<a, b>> =>
-    segment(base.concat(route))
-  router.route = base
+  const dsl = <b>(route: Param<b>): RouterSegment<Push<a, b>> =>
+    segment(base.var(route))
+  dsl.route = base
 
-  router.read = Router.prototype.read
-  router.write = Router.prototype.write
+  dsl.parseRoute = API.prototype.parseRoute
+  dsl.formatRoute = API.prototype.formatRoute
 
-  router.parse = Router.prototype.parse
-  router.parsePath = Router.prototype.parsePath
-  router.parseHash = Router.prototype.parseHash
+  dsl.parse = API.prototype.parse
+  dsl.parsePath = API.prototype.parsePath
+  dsl.parseHash = API.prototype.parseHash
 
-  router.format = Router.prototype.format
-  router.formatPath = Router.prototype.formatPath
-  router.formatHash = Router.prototype.formatHash
+  dsl.format = API.prototype.format
+  dsl.formatPath = API.prototype.formatPath
+  dsl.formatHash = API.prototype.formatHash
 
-  router.segment = Router.prototype.segment
-  router.param = Router.prototype.param
-  router.concat = Router.prototype.concat
-  router.query = Router.prototype.query
+  dsl.segment = API.prototype.segment
+  dsl.param = API.prototype.param
+  dsl.var = API.prototype.var
+  dsl.const = API.prototype.const
+  dsl.rest = API.prototype.rest
+  dsl.query = API.prototype.query
 
-  return router
+  return dsl
 }
 
-const segments = (path: string): Route<[]> => {
+const addSegments = <a>(base: Route<a>, path: string): Route<a> => {
+  let route = base
   const segments = parsePathname(path)
-  let route = Empty
   for (let fragment of segments) {
     if (fragment !== "") {
       route = route.segment(fragment)
@@ -103,30 +122,34 @@ const segments = (path: string): Route<[]> => {
   return route
 }
 
+export const segments = (path: string): Route<[]> => addSegments(Base, path)
+
 const segment = <a>(base: Route<a>): RouterSegment<a> => {
-  const router = (fragments: string[], ...params: string[]): RouterParam<a> => {
+  const dsl = (fragments: string[], ...params: string[]): RouterParam<a> => {
     const path = raw({ raw: (fragments: any) }, ...params)
-    return param(base.concat(segments(path)))
+    return param(addSegments(base, path))
   }
-  router.route = base
+  dsl.route = base
 
-  router.read = Router.prototype.read
-  router.write = Router.prototype.write
+  dsl.parseRoute = API.prototype.parseRoute
+  dsl.formatRoute = API.prototype.formatRoute
 
-  router.parse = Router.prototype.parse
-  router.parsePath = Router.prototype.parsePath
-  router.parseHash = Router.prototype.parseHash
+  dsl.parse = API.prototype.parse
+  dsl.parsePath = API.prototype.parsePath
+  dsl.parseHash = API.prototype.parseHash
 
-  router.format = Router.prototype.format
-  router.formatPath = Router.prototype.formatPath
-  router.formatHash = Router.prototype.formatHash
+  dsl.format = API.prototype.format
+  dsl.formatPath = API.prototype.formatPath
+  dsl.formatHash = API.prototype.formatHash
 
-  router.segment = Router.prototype.segment
-  router.param = Router.prototype.param
-  router.concat = Router.prototype.concat
-  router.query = Router.prototype.query
+  dsl.segment = API.prototype.segment
+  dsl.param = API.prototype.param
+  dsl.var = API.prototype.var
+  dsl.const = API.prototype.const
+  dsl.rest = API.prototype.rest
+  dsl.query = API.prototype.query
 
-  return router
+  return dsl
 }
 
 export const route = (
@@ -134,9 +157,93 @@ export const route = (
   ...params: string[]
 ): RouterParam<[]> => {
   const path = String.raw({ raw: (fragments: any) }, ...params)
-  if (path.charAt(0) === "/") {
-    return param(Root.concat(segments(path)))
-  } else {
-    return param(segments(path))
+  const base = path.charAt(0) === "/" ? Root : Base
+  return param(addSegments(base, path))
+}
+
+interface Request {
+  url: URL;
+  method: string;
+}
+
+interface Router<a> {
+  route(Request): ?a;
+  method<x, b>(string, Route<x>, Decoder<x, b>): Router<a | b>;
+  get<x, b>(Route<x>, Decoder<x, b>): Router<a | b>;
+  put<x, b>(Route<x>, Decoder<x, b>): Router<a | b>;
+  post<x, b>(Route<x>, Decoder<x, b>): Router<a | b>;
+  delete<x, b>(Route<x>, Decoder<x, b>): Router<a | b>;
+  head<x, b>(Route<x>, Decoder<x, b>): Router<a | b>;
+}
+
+class RouterAPI<a> implements Router<a> {
+  +route: Request => ?a
+  method<x, b>(
+    name: string,
+    route: Route<x>,
+    decoder: Decoder<x, b>
+  ): Router<a | b> {
+    const right: Router<b> = new LeafRouter(name, route, decoder)
+    return new BranchRouter(this, right)
+  }
+  get<x, b>(route: Route<x>, decoder: Decoder<x, b>): Router<a | b> {
+    return this.method("GET", route, decoder)
+  }
+  put<x, b>(route: Route<x>, decoder: Decoder<x, b>): Router<a | b> {
+    return this.method("PUT", route, decoder)
+  }
+  post<x, b>(route: Route<x>, decoder: Decoder<x, b>): Router<a | b> {
+    return this.method("POST", route, decoder)
+  }
+  delete<x, b>(route: Route<x>, decoder: Decoder<x, b>): Router<a | b> {
+    return this.method("DELETE", route, decoder)
+  }
+  head<x, b>(route: Route<x>, decoder: Decoder<x, b>): Router<a | b> {
+    return this.method("HEAD", route, decoder)
   }
 }
+
+class LeafRouter<x, a> extends RouterAPI<a> {
+  type: string
+  decoder: Decoder<x, a>
+  leaf: Route<*> // TODO: Find out why flow does not like `x` here.
+  constructor(type: string, leaf: Route<x>, decoder: Decoder<x, a>) {
+    super()
+    this.type = type
+    this.decoder = decoder
+    this.leaf = leaf
+  }
+  route(request: Request): ?a {
+    if (request.method.toUpperCase() === this.type) {
+      return decodePath(this.leaf, request.url, this.decoder)
+    } else {
+      return null
+    }
+  }
+}
+
+class BranchRouter<a, b> extends RouterAPI<a | b> {
+  left: Router<a>
+  right: Router<b>
+  constructor(left: Router<a>, right: Router<b>) {
+    super()
+    this.left = left
+    this.right = right
+  }
+  route(request: Request): ?(a | b) {
+    const out = this.left.route(request)
+    if (out == null) {
+      return this.right.route(request)
+    } else {
+      return out
+    }
+  }
+}
+
+class EmptyRouter extends RouterAPI<empty> {
+  route(request: Request): null {
+    return null
+  }
+}
+
+export const router: Router<empty> = new EmptyRouter()

@@ -1,4 +1,4 @@
-/* @flow */
+// @flow strict
 
 import test from "blue-tape"
 import * as Router from "../"
@@ -123,25 +123,6 @@ test("multiparam", async test => {
     search: "",
     hash: ""
   })
-})
-
-test("composition", async test => {
-  const blogPosts = Router.route`/blog`
-  const postID = Router.route`post/`(Router.String)`/`(Router.Integer)
-  test.deepEqual(postID.parsePath({ pathname: "post/jack/35/" }), ["jack", 35])
-
-  const blogPostID = blogPosts(postID)
-
-  test.deepEqual(blogPostID.parsePath({ pathname: "/blog/post/jack/35/" }), [
-    "jack",
-    35
-  ])
-  test.deepEqual(blogPostID.parsePath({ pathname: "/post/tim/42/" }), null)
-  test.deepEqual(blogPostID.parsePath({ pathname: "blog/post/nina/7" }), null)
-  test.deepEqual(blogPostID.parsePath({ pathname: "/blog/post/ana/" }), null)
-
-  // TODO: Figure out what's the problem with flow here:
-  // blogPostID.formatPath("jack", Integer.truncate(9))
 })
 
 test("parameter first", async test => {

@@ -64,35 +64,33 @@ Even if we manage to keep parameter nameing in sync across the code base and exc
 
 ## Solution
 
-> **Note:** Example below is more verbose than one above, but that is because it is meant to illustrate low-level API provided by this library, which is more of a building block for something like [Express][]. It is also worth noting that API of this library is designed towards taking advantage of type system that does not quite fit [Express][] API and that shows
-
 
 ```js
+import express from "express"
 import * as Router from "router.flow"
 import * as URL from "url"
-import express from "express"
+import * as Float from "float.flow"
 
 const index = Router.route`/`
-const calculator = Router.route`/calculator/`(Router.Float)`/+/`(Router.Float)
+const plus = Router.route`/calculator/`(Router.Float)`/+/`(Router.Float)
 
-const getIndex = response =>
-  response.send(`<a href='${calculator.formatPath(313, 3)}'>Calculate 313 + 3</a>`)
+const viewIndex = () => {
+  const link = calculator.formatPath(Float.toFloat(313), Float.toFloat(3))
+  return `<a href='${link}'>Calculate 313 + 3</a>`
+}
 
-const getCalculator = (response, a: number, b: number) =>
-  response.send(`${a + b}`)
+const viewPlus = (a: number) => (b: number) =>
+  `${a + b}`
+
+const router = Router.router
+  .get(index, viewIndex)
+  .get(plus, viewPlus)
 
 const app = express()
 app.use((request, response) => {
-  const url = URL.parse(request.url)
-
-  const indexParams = index.parsePath(url)
-  if (indexParams) {
-    return getIndex(request, ...indexParams)
-  }
-
-  const calculatorParams = calculator.parsePath(url)
-  if (calculatorParams) {
-    return getCalculator(res, ...calculatorParams)
+  const data = router.route(request)
+  if (data) {
+    response.send(data)
   }
 })
 ```
@@ -102,13 +100,16 @@ Presented solution attempts to illustrate building blocks from this library for 
 
 1. Parsing route parameters in a type safe way.
 
-   Type checker ([Flow][]) can ensure that there is no missmatch between extracted parameters and handlers (`getIndex`, `getCalculator`) using them.
+   Type checker ([Flow][]) can ensure that there is no missmatch between extracted parameters and their handlers (`viewIndex`, `viewPlus`) using them.
    
-   > **Note:** In this specific examlpe [Flow][] will not complain if handler is passed less parameters than it expects due to the way it handles [function subtyping][] rules. That being said, this library comes with solution to address that and ensure that extracted number of parameters matches of what handler expects, it's just seemed little too much for this example.
+   > **Note:** According to [Flow][]'s [function subtyping][] rules `a => b` is subtype of `(a, a) => b` there for library chose to use handlers like `a => a => b` instead which ensures that supplied handler expect all the parameters. On the flip side it requires use of less conventional handlers & typing but with arrow functions it seemed like a right tradeoff. 
+
 
 2. Format hyper-links in type safe way.
 
-   Links are formated by calling `.format(313, 3)` on the route itself allowing type checker to report any missmatch in type or number of parameters passed.
+   Links are formated by calling `.formatPath(...)` on the route defined routes and there for type checker is able to report missmatch in type or number of parameters passed.
+
+   > **Note:**  Our examples pass parameters like `Float.toFloat(3)` as route expects `float` parameters and that function takes `number` and returns `float`. We might consider adding `Router.Number` in the future.
 
 This elliminates all of the problems pointed out with original example:
 
@@ -129,6 +130,84 @@ This elliminates all of the problems pointed out with original example:
 ## Install
 
     npm install router.flow
+
+## Usage
+
+### Import
+
+
+Rest of the the document & provided code examples assumes that library is installed (with yarn or npm) and imported as follows:
+
+```js
+import * as Router from "router.flow"
+```
+
+### Routes
+
+`route` is a convenient function that provides a DSL for defining routes via [tagged template literals][] as an alternative to using low-level API exposed by [route.flow][].
+
+#### Absolute routes
+
+Absolute routes **must** start with leading `/` character
+
+```js
+Router.route`/`.parsePath({ pathname: "/" }) //> []
+Router.route`/`.parsePath({ pathname: "/foo" }) //> null
+Router.route`/`.formatPath() //> "/"
+
+Router.route`/blog`.parsePath({ pathname: "/blog" }) //> []
+Router.route`/blog`.parsePath({ pathname: "blog" }) //> null
+```
+
+#### Relative routes
+
+If route does not start with leading `/` character it's going to only match relative paths
+
+```js
+Router.route`blog`.parsePath({ pathname: "blog" }) //> []
+Router.route`blog`.parsePath({ pathname: "/blog" }) //> null
+
+Router.route`blog`.formatPath() //> "blog"
+```
+
+#### Multiple segments
+
+Route literal may contain multiple segments separated via `/` charater.
+
+```js
+const comment = Router.route`/user/comment`
+comment.parsePath({ pathname: "/user/comment" }) //> []
+comment.parsePath({ pathname: "/user/comment/" }) //> []
+comment.parsePath({ pathname: "/user/comment/cat" }) //> null
+comment.parsePath({ pathname: "user/comment" }) //> null
+
+comment.formatPath() //> "/user/comment"
+```
+
+> **Note:** Trailing `/` charater is optional. But if used route will only match paths with trailing `/`, when route formatted trailing `/` will appear only if it was present in the route.
+
+```js
+const comment2 = Router.route`/user/comment/`
+
+comment2.parsePath({ pathname: "/user/comment" }) //> null
+comment2.parsePath({ pathname: "/user/comment/" }) //> []
+comment2.formatPath() //> "/user/comment/"
+```
+
+[Tagged template literals]:https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#Tagged_template_literals
+[node URL]:https://nodejs.org/dist/latest-v8.x/docs/api/url.html#url_class_url
+[Location]:https://developer.mozilla.org/en-US/docs/Web/API/Location
+[opquae type alias]:https://flow.org/en/docs/types/opaque-types/
+[float.flow]:https://www.npmjs.com/package/float.flow
+[integer.flow]:https://www.npmjs.com/package/integer.flow
+[query parameters]:#query_parameters
+[function subtyping]:https://flow.org/blog/2017/05/07/Strict-Function-Call-Arity/#function-subtyping
+[Express]:https://expressjs.com/
+[express routing]:https://expressjs.com/en/guide/routing.html
+[Node.js]:https://nodejs.org/en/
+[flow]:http://flow.org/
+[typescript]:http://typescriptlang.org/
+[route.flow]:https://github.com/Gozala/route.flow
 
 [travis.icon]: https://travis-ci.org/Gozala/router.flow.svg?branch=master
 [travis.url]: https://travis-ci.org/Gozala/router.flow
